@@ -1,19 +1,21 @@
+import smtplib
 import requests
 import datetime
-import time
 import os
 import pytz
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
-# Configurações
+# Configuração do servidor SMTP do Gmail
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+EMAIL_REMETENTE = "alertamkpin@gmail.com"
+EMAIL_SENHA = "cxxfypbbpropyeua"
+EMAIL_DESTINATARIO = "jvcosta@grupopanvel.com.br"
+
+# Configuração da API VTEX
 API_URL = os.getenv("API_URL", "https://panvelprd.vtexcommercestable.com.br/api/oms/pvt/orders")
-WEBHOOK_TEAMS = os.getenv("WEBHOOK_TEAMS", "https://prod-11.westus.logic.azure.com:443/workflows/34cc52deab894b879601fade914a267c/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=W2aiZMfB2kseAhtZxPuEPcyDN3Au_Bl7nBON1uAVDk8")
-INTERVALO_MINUTOS = int(os.getenv("INTERVALO_MINUTOS", 10))  # Tempo entre execuções
-HEADERS = {
-    "X-VTEX-API-AppKey": "vtexappkey-panvelprd-OLDAFN",
-    "X-VTEX-API-AppToken": "UOFVLDXSQIKCFYVTKNGANQCHIWJLHGWBOPXWGORMXUPEYLSHJPNTPXSIHZNDCTTYOLNFWTALWYJEKBMDYEYXZEUSCHZWEAYQUILSCTOOCWIONMKBRUVESGZOFMQRYZUD", 
-    "Content-Type": "application/json", 
-    "Accept": "application/json",
-    }
+HEADERS = {"X-VTEX-API-AppKey": "vtexappkey-panvelprd-OLDAFN","X-VTEX-API-AppToken": "UOFVLDXSQIKCFYVTKNGANQCHIWJLHGWBOPXWGORMXUPEYLSHJPNTPXSIHZNDCTTYOLNFWTALWYJEKBMDYEYXZEUSCHZWEAYQUILSCTOOCWIONMKBRUVESGZOFMQRYZUD", "Content-Type": "application/json", "Accept": "application/json"}
 
 # Definição dos fusos horários
 UTC = pytz.utc
@@ -21,8 +23,7 @@ SAO_PAULO = pytz.timezone("America/Sao_Paulo")
 
 def obter_ultimo_pedido():
     """Consulta a API e retorna o último pedido como um objeto datetime no fuso de São Paulo."""
-    
-    # Definir o intervalo de datas para a consulta (apenas pedidos do dia atual)
+ 
     hoje = datetime.datetime.utcnow().strftime("%Y-%m-%dT00:00:00Z")
     agora = datetime.datetime.utcnow().strftime("%Y-%m-%dT23:59:59Z")
 
@@ -31,7 +32,6 @@ def obter_ultimo_pedido():
         "f_status": "payment-approved,invoiced"
     }
 
-    # Chamada da API com os parâmetros
     response = requests.get(API_URL, headers=HEADERS, params=params)
     response.raise_for_status()
     data = response.json()
@@ -41,49 +41,56 @@ def obter_ultimo_pedido():
         print("❌ Nenhum pedido encontrado para o filtro.")
         return None
 
-    # Pegando o último pedido com base no campo "creationDate"
     ultimo_pedido = max(pedidos, key=lambda x: x["creationDate"])
-
-    # Ajuste para remover fuso horário e converter corretamente
     creation_date = ultimo_pedido["creationDate"]
-
-    # Removendo fuso horário (+00:00) se existir
+    
     if "+" in creation_date:
         creation_date = creation_date.split("+")[0]
-
-    # Removendo casas decimais extras (apenas deixar 6 dígitos)
     if "." in creation_date:
         creation_date = creation_date.split(".")[0] + "." + creation_date.split(".")[1][:6]
 
-    # Converter para datetime UTC
     dt_utc = datetime.datetime.fromisoformat(creation_date).replace(tzinfo=UTC)
-
-    # Converter para horário de São Paulo
     dt_sao_paulo = dt_utc.astimezone(SAO_PAULO)
 
     return dt_sao_paulo
 
+def enviar_email(ultimo_pedido):
+    """Envia um e-mail de alerta se passaram mais de 30 minutos sem pedidos."""
+    agora = datetime.datetime.now(SAO_PAULO)
+    tempo_sem_pedido = (agora - ultimo_pedido).total_seconds()
 
-def enviar_alerta(ultimo_pedido):
-    """Envia um alerta para o Microsoft Teams se passar do tempo limite."""
-    mensagem = {
-        "title": "🚨 Alerta: Tempo sem pedidos!",
-        "text": f"Estamos desde às {ultimo_pedido} sem efetivar pedido."
-    }
-    requests.post(WEBHOOK_TEAMS, json=mensagem)
+    if tempo_sem_pedido > 120:  # 30 minutos sem pedido
+        msg = MIMEMultipart()
+        msg["From"] = EMAIL_REMETENTE
+        msg["To"] = EMAIL_DESTINATARIO
+        msg["Subject"] = "🚨 Alerta: Tempo sem pedidos!"
 
-while True:
-    try:
-        ultimo = obter_ultimo_pedido()
-        agora = datetime.datetime.now(SAO_PAULO)
-        
-        if ultimo and (agora - ultimo).total_seconds() > 1800:  # 30 minutos
-            enviar_alerta(ultimo)
-        
-        print(f"Verificação feita às {agora}. Último pedido às {ultimo}.")
-        
-    except Exception as e:
-        print(f"Erro: {e}")
-    
-    # Espera X minutos antes de rodar de novo
-    time.sleep(INTERVALO_MINUTOS * 60)
+        mensagem = f"""
+        <html>
+        <body>
+            <h2>🚨 Alerta de Pedidos</h2>
+            <p>Estamos desde <strong>{ultimo_pedido.strftime('%H:%M:%S')}</strong> sem efetivar pedidos.</p>
+            <p>Por favor, verifique o sistema!</p>
+        </body>
+        </html>
+        """
+        msg.attach(MIMEText(mensagem, "html"))
+
+        try:
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.starttls()
+            server.login(EMAIL_REMETENTE, EMAIL_SENHA)
+            server.sendmail(EMAIL_REMETENTE, EMAIL_DESTINATARIO, msg.as_string())
+            server.quit()
+            print("✅ E-mail de alerta enviado com sucesso!")
+        except Exception as e:
+            print(f"❌ Erro ao enviar e-mail: {e}")
+    else:
+        print(f"✅ Último pedido foi há {tempo_sem_pedido/60:.1f} minutos. Nenhum alerta necessário.")
+
+# Executar a lógica do alerta
+ultimo_pedido_teste = obter_ultimo_pedido()
+if ultimo_pedido_teste:
+    enviar_email(ultimo_pedido_teste)
+else:
+    print("⚠️ Nenhum pedido encontrado para teste de alerta.")

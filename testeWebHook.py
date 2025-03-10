@@ -14,9 +14,29 @@ MENSAGEM = "Estamos desde às 14:48 sem efetivar pedidos. Por favor, verifique o
 
 def enviar_email():
     """Envia um e-mail de alerta."""
-    msg = MIMEMultipart()
-    msg["From"] = EMAIL_REMETENTE
-    msg["To"] = EMAIL_DESTINATARIO
-    msg["Subject"] = ASSUNTO
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = EMAIL_REMETENTE
+        msg["To"] = EMAIL_DESTINATARIO
+        msg["Subject"] = ASSUNTO
 
-    msg.attach(MIMEText(MENSAGEM, "plain"))
+        msg.attach(MIMEText(MENSAGEM, "plain"))
+
+        print("🔹 Conectando ao servidor SMTP...")
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.set_debuglevel(1)  # Ativa logs detalhados da conexão SMTP
+        server.starttls()
+        
+        print("🔹 Logando no e-mail...")
+        server.login(EMAIL_REMETENTE, EMAIL_SENHA)
+
+        print("🔹 Enviando e-mail...")
+        server.sendmail(EMAIL_REMETENTE, EMAIL_DESTINATARIO, msg.as_string())
+
+        server.quit()
+        print("✅ E-mail enviado com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao enviar e-mail: {e}")
+
+# Testar o envio do e-mail
+enviar_email()
