@@ -25,7 +25,7 @@ SAO_PAULO = pytz.timezone("America/Sao_Paulo")
 def obter_ultimo_pedido():
     """Consulta a API e retorna o último pedido como um objeto datetime no fuso de São Paulo."""
     print("🔹 Consultando a API VTEX...")
-
+    horaAgora = datetime.datetime.now(SAO_PAULO).strftime("%H:%M:%S")
     hoje = datetime.datetime.utcnow().strftime("%Y-%m-%dT00:00:00Z")
     agora = datetime.datetime.utcnow().strftime("%Y-%m-%dT23:59:59Z")
 
@@ -100,7 +100,8 @@ def enviar_email(ultimo_pedido):
 print("🔄 Iniciando monitoramento de pedidos...")
 
 for i in range(48):  # Executa 48 vezes
-    print(f"\n🔄 Verificação {i+1}/48:")
+    horaAgora = datetime.datetime.now(SAO_PAULO).strftime("%H:%M:%S")
+    print(f"\n🔄 Verificação {i+1}/48, às {horaAgora}")
     ultimo_pedido = obter_ultimo_pedido()
 
     if ultimo_pedido:
@@ -109,6 +110,6 @@ for i in range(48):  # Executa 48 vezes
         print("⚠️ Nenhum pedido encontrado para alerta.")
 
     print("⏳ Aguardando 30 minutos para a próxima verificação...")
-    time.sleep(1800)  # 600 segundos = 10 minutos
+    time.sleep(30)  # 600 segundos = 10 minutos
 
 print("⏹ Monitoramento finalizado. Execute novamente para continuar.")
