@@ -4,19 +4,39 @@ import datetime
 import os
 import pytz
 import time
+import threading
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from dotenv import load_dotenv
+from flask import Flask
+
+# Carrega as variáveis de ambiente
+load_dotenv(override=True)
+
+# Configuração do Flask para manter o Replit ativo
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🚀 Monitoramento de Pedidos está rodando!"
 
 # Configuração do servidor SMTP do Gmail
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-EMAIL_REMETENTE = "alertamkpin@gmail.com"
-EMAIL_SENHA = "cxxfypbbpropyeua"  # Substituir pela senha de app
-EMAIL_DESTINATARIO = "jvcosta@grupopanvel.com.br"
+EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE")
+EMAIL_SENHA = os.getenv("EMAIL_SENHA")
+EMAIL_DESTINATARIO = os.getenv("EMAIL_DESTINATARIO")
 
 # Configuração da API VTEX
+vtexKey = os.getenv("vtexKey")
+vtexToken = os.getenv("vtexToken")
 API_URL = os.getenv("API_URL", "https://panvelprd.vtexcommercestable.com.br/api/oms/pvt/orders")
-HEADERS = {"X-VTEX-API-AppKey": "vtexappkey-panvelprd-OLDAFN","X-VTEX-API-AppToken": "UOFVLDXSQIKCFYVTKNGANQCHIWJLHGWBOPXWGORMXUPEYLSHJPNTPXSIHZNDCTTYOLNFWTALWYJEKBMDYEYXZEUSCHZWEAYQUILSCTOOCWIONMKBRUVESGZOFMQRYZUD","Content-Type": "application/json","Accept": "application/json"}
+HEADERS = {
+    "X-VTEX-API-AppKey": vtexKey,
+    "X-VTEX-API-AppToken": vtexToken,
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+}
 
 # Definição dos fusos horários
 UTC = pytz.utc
@@ -25,7 +45,6 @@ SAO_PAULO = pytz.timezone("America/Sao_Paulo")
 def obter_ultimo_pedido():
     """Consulta a API e retorna o último pedido como um objeto datetime no fuso de São Paulo."""
     print("🔹 Consultando a API VTEX...")
-    horaAgora = datetime.datetime.now(SAO_PAULO).strftime("%H:%M:%S")
     hoje = datetime.datetime.utcnow().strftime("%Y-%m-%dT00:00:00Z")
     agora = datetime.datetime.utcnow().strftime("%Y-%m-%dT23:59:59Z")
 
@@ -62,7 +81,7 @@ def obter_ultimo_pedido():
         return None
 
 def enviar_email(ultimo_pedido):
-    """Envia um e-mail de alerta se passaram mais de 30 minutos sem pedidos."""
+    """Envia um e-mail de alerta se passaram mais de 60 minutos sem pedidos."""
     agora = datetime.datetime.now(SAO_PAULO)
     tempo_sem_pedido = (agora - ultimo_pedido).total_seconds()
 
@@ -96,20 +115,28 @@ def enviar_email(ultimo_pedido):
     else:
         print(f"✅ Último pedido foi há {tempo_sem_pedido/60:.1f} minutos. Nenhum alerta necessário.")
 
-# Loop para rodar a cada 15 minutos
-print("🔄 Iniciando monitoramento de pedidos...")
+def monitorar_pedidos():
+    """Loop infinito para monitoramento de pedidos a cada 30 minutos."""
+    print("🔄 Iniciando monitoramento de pedidos...")
+    
+    while True:
+        horaAgora = datetime.datetime.now(SAO_PAULO).strftime("%H:%M:%S")
+        print(f"\n🔄 Verificação às {horaAgora}")
+        
+        ultimo_pedido = obter_ultimo_pedido()
 
-for i in range(48):  # Executa 48 vezes
-    horaAgora = datetime.datetime.now(SAO_PAULO).strftime("%H:%M:%S")
-    print(f"\n🔄 Verificação {i+1}/48, às {horaAgora}")
-    ultimo_pedido = obter_ultimo_pedido()
+        if ultimo_pedido:
+            enviar_email(ultimo_pedido)
+        else:
+            print("⚠️ Nenhum pedido encontrado para alerta.")
 
-    if ultimo_pedido:
-        enviar_email(ultimo_pedido)
-    else:
-        print("⚠️ Nenhum pedido encontrado para alerta.")
+        print("⏳ Aguardando 30 minutos para a próxima verificação...")
+        time.sleep(1800)  # Aguarda 30 minutos antes de rodar de novo
 
-    print("⏳ Aguardando 30 minutos para a próxima verificação...")
-    time.sleep(30)  # 600 segundos = 10 minutos
+# 🔥 Inicia o monitoramento de pedidos em uma thread separada
+thread = threading.Thread(target=monitorar_pedidos)
+thread.start()
 
-print("⏹ Monitoramento finalizado. Execute novamente para continuar.")
+# 🔥 Inicia o Flask para manter o Replit rodando
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=8080)
